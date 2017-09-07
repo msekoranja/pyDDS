@@ -1,4 +1,4 @@
-pyDDS (a Python 2.7 wrapper for RTI DDS.)
+pyDDS (a Python 3 wrapper for RTI DDS.)
 =========================================
 
 Overview
