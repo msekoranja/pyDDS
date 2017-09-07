@@ -149,12 +149,10 @@ def check_true(result, func, arguments):
 def get(name, data_type):
     return ctypes.cast(getattr(_ddsc_lib, 'DDS_' + name), ctypes.POINTER(data_type)).contents
 
-@apply
 class DDSFunc(object):
     pass
 
-@apply
-class DDSType(object):
+class DDSType_(type):
     def __getattr__(self, attr):
         contents = type(attr, (ctypes.Structure,), {})
 
@@ -171,6 +169,9 @@ class DDSType(object):
 
         setattr(self, attr, contents)
         return contents
+
+class DDSType(metaclass=DDSType_):
+    pass
 
 
 DDSType.Duration_t._fields_ = [
@@ -361,14 +362,15 @@ _dyn_basic_types = {
     TCKind.CHAR      : ('char', DDS_Char, None),
     TCKind.WCHAR     : ('wchar', DDS_Wchar, None),
 }
-def _define_func((p, errcheck, restype, argtypes)):
+def _define_func(func_params):
+    (p, errcheck, restype, argtypes) = func_params
     f = getattr(_ddsc_lib, 'DDS_' + p)
     if errcheck is not None:
         f.errcheck = errcheck
     f.restype = restype
     f.argtypes = argtypes
     setattr(DDSFunc, p, f)
-map(_define_func, [
+list(map(_define_func, [
     ('DomainParticipantFactory_get_instance',
         check_null, ctypes.POINTER(DDSType.DomainParticipantFactory),
         []),
@@ -534,10 +536,10 @@ map(_define_func, [
         [ctypes.POINTER(DDSType.TypeCode), ctypes.POINTER(DDSType.DynamicDataProperty_t)]),
 ] + [
     ('DynamicData_get_' + func_name, check_code, DDS_ReturnCode_t, [ctypes.POINTER(DDSType.DynamicData), ctypes.POINTER(data_type), ctypes.c_char_p, DDS_DynamicDataMemberId])
-        for func_name, data_type, bounds in _dyn_basic_types.itervalues()
+        for func_name, data_type, bounds in _dyn_basic_types.values()
 ] + [
     ('DynamicData_set_' + func_name, check_code, DDS_ReturnCode_t, [ctypes.POINTER(DDSType.DynamicData), ctypes.c_char_p, DDS_DynamicDataMemberId, data_type])
-        for func_name, data_type, bounds  in _dyn_basic_types.itervalues()
+        for func_name, data_type, bounds  in _dyn_basic_types.values()
 ] + [
     ('DynamicData_get_string',
         check_code, DDS_ReturnCode_t,
@@ -670,7 +672,7 @@ map(_define_func, [
         check_true, DDS_Boolean, [ctypes.POINTER(DDSType.ConditionSeq)]),
     ('ConditionSeq_finalize',
         check_true, DDS_Boolean, [ctypes.POINTER(DDSType.ConditionSeq)]),
-])
+]))
 
 def write_into_dd_member(obj, dd, member_name=None, member_id=DDS_DYNAMIC_DATA_MEMBER_ID_UNSPECIFIED):
     tc = ctypes.POINTER(DDSType.TypeCode)()
@@ -710,9 +712,9 @@ def write_into_dd(obj, dd):
     if kind == TCKind.STRUCT:
         assert isinstance(obj, dict)
         tc = dd.get_type()
-        for i in xrange(tc.member_count(ex())):
+        for i in range(tc.member_count(ex())):
             name = tc.member_name(i, ex())
-            write_into_dd_member(obj[name], dd, member_name=name)
+            write_into_dd_member(obj[bytes.decode(name)], dd, member_name=name)
     elif kind == TCKind.ARRAY or kind == TCKind.SEQUENCE:
         assert isinstance(obj, list)
         for i, x in enumerate(obj):
@@ -766,13 +768,13 @@ def unpack_dd(dd):
     if kind == TCKind.STRUCT:
         obj = {}
         tc = dd.get_type()
-        for i in xrange(tc.member_count(ex())):
+        for i in range(tc.member_count(ex())):
             name = tc.member_name(i, ex())
             obj[name] = unpack_dd_member(dd, member_name=name)
         return obj
     elif kind == TCKind.ARRAY or kind == TCKind.SEQUENCE:
         obj = []
-        for i in xrange(dd.get_member_count()):
+        for i in range(dd.get_member_count()):
             obj.append(unpack_dd_member(dd, member_id=i+1))
         return obj
     else:
@@ -815,7 +817,7 @@ class TopicSuper(object):
         self._instance_revoked_cb     = None
         self._liveliness_lost_cb      = None
 
-        if not _filtered_topic_refs.has_key(name): _filtered_topic_refs[name] = []
+        if name not in _filtered_topic_refs: _filtered_topic_refs[name] = []
 
         def _cleanup(ref):
             if type(topic) is ctypes.POINTER(DDSType.Topic):
@@ -834,7 +836,7 @@ class TopicSuper(object):
         def get_keys():
             keys = []
             tc = self.data_type._get_typecode()
-            for i in xrange(tc.member_count(ex())):
+            for i in range(tc.member_count(ex())):
                 if tc.is_member_key(i, ex()):
                     keys.append(tc.member_name(i, ex()))
 
@@ -911,7 +913,7 @@ class TopicSuper(object):
                 get('ANY_INSTANCE_STATE', DDS_InstanceStateMask)
             )
 
-            for i in xrange(self._data_seq.get_length()):
+            for i in range(self._data_seq.get_length()):
                 info = self._info_seq.get_reference(i).contents
                 sample = self._data_seq.get_reference(i)
 
@@ -955,7 +957,7 @@ class TopicSuper(object):
         return instance
 
     def _update(self, obj, data):
-        for k, v in data.iteritems():
+        for k, v in data.items():
             if isinstance(v, collections.Mapping):
                 r = self._update(obj.get(k, {}), v)
                 obj[k] = r
@@ -1029,7 +1031,7 @@ class Topic(TopicSuper):
 
     def _create_topic(self):
         return self._dds._participant.create_topic(
-            self.name,
+            self.name.encode(),
             self.data_type._get_typecode().name(ex()),
             get('TOPIC_QOS_DEFAULT', DDSType.TopicQos),
             None,
@@ -1233,7 +1235,7 @@ class DDS(object):
             get('ANY_INSTANCE_STATE', DDS_InstanceStateMask)
         )
 
-        for i in xrange(self._data_seq.get_length()):
+        for i in range(self._data_seq.get_length()):
             pd = self._data_seq.get_reference(i)
             if pd.contents.type_name and pd.contents.type_name not in self._all_topics:
                 if self._initialized:
@@ -1313,25 +1315,28 @@ class DDS(object):
 
 
 class LibraryType(object):
+    _get_typecode_func = None
+
     def __init__(self, libs, name):
-        self._libs, self.name = libs, name
-        del libs, name
-
-        assert self._get_typecode().name(ex()).replace('::', '_') == self.name.replace('::', '_')
-
-    def _get_typecode(self):
-        for lib in self._libs:
-            if hasattr(lib, self.name + '_get_typecode'):
-                f = getattr(lib, self.name + '_get_typecode')
+        for lib in libs:
+            if hasattr(lib, name + '_get_typecode'):
+                f = getattr(lib, name + '_get_typecode')
                 f.argtypes = []
                 f.restype = ctypes.POINTER(DDSType.TypeCode)
                 f.errcheck = check_null
-                return f()
-        raise ValueError("Couldn't find the topic in the provided libraries. Tried to find: " + self.name)
+                self._get_typecode_func = f()
+        
+        if self._get_typecode_func is None:
+            raise ValueError("Couldn't find the topic in the provided libraries. Tried to find: " + name)
+
+        assert self._get_typecode().name(ex()).decode().replace('::', '_') == name.replace('::', '_')
+
+    def _get_typecode(self):
+        return self._get_typecode_func
 
 class Library(object):
     def __init__(self, so_paths):
-        self._libs = map(ctypes.CDLL, so_paths)
+        self._libs = list(map(ctypes.CDLL, so_paths))
 
     def __getattr__(self, attr):
         res = LibraryType(self._libs, attr)
